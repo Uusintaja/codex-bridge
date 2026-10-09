@@ -109,14 +109,24 @@
       return String(decoding: buffer.prefix(Int(length)), as: UTF16.self)
     }
 
-    /// Portable-scoped single-instance name (FNV-1a of exe directory).
+    /// Instance-scoped single-instance name. Prefers the orchestrator-assigned
+    /// data-root (one per profile) so a single binary directory can host N
+    /// isolated Apps; falls back to the exe directory (legacy single copy).
     private static func singleInstanceMutexName() -> String {
-      guard let path = currentExecutablePath(),
+      let env = ProcessInfo.processInfo.environment
+      let scope: String
+      if let root = env["CODEX_BRIDGE_DATA_ROOT"], !root.isEmpty {
+        scope = "dataroot:" + root
+      } else if let inst = env["CODEX_BRIDGE_INSTANCE"], !inst.isEmpty {
+        scope = "instance:" + inst
+      } else if let path = currentExecutablePath(),
         let sep = path.lastIndex(of: "\\")
-      else {
+      {
+        scope = String(path[..<sep])
+      } else {
         return "Local\\CodexBridge.WindowsApp.SingleInstance"
       }
-      let directory = String(path[..<sep]).lowercased().replacingOccurrences(
+      let directory = scope.lowercased().replacingOccurrences(
         of: "/", with: "\\")
       var hash: UInt64 = 14_695_981_039_346_656_037
       for byte in directory.utf8 {
