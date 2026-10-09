@@ -70,10 +70,11 @@
       }
     }
 
-    /// Path of the bootstrap log the service's stderr is redirected to. The
-    /// directory matches `ServiceDataPaths.defaultRoot()` so the service and
-    /// the shell agree on where startup diagnostics live.
+    /// Path of the bootstrap log. Portable fix: prefer
+    /// <exe-dir>/codex-bridge-data/service/Logs when that tree exists (or
+    /// CODEX_BRIDGE_DATA_ROOT is set), so two copies never share %APPDATA%.
     static var bootstrapLogURL: URL? {
+      if let portable = portableBootstrapLogURL() { return portable }
       guard
         let support = FileManager.default.urls(
           for: .applicationSupportDirectory, in: .userDomainMask
@@ -82,6 +83,39 @@
       return
         support
         .appending(path: "CodexBridgeService", directoryHint: .isDirectory)
+        .appending(path: "Logs", directoryHint: .isDirectory)
+        .appending(path: "service-bootstrap.log")
+    }
+
+    /// Portable data-root for this copy: <exe-dir>/codex-bridge-data/service.
+    static func portableDataRoot() -> String? {
+      let env = ProcessInfo.processInfo.environment
+      if let configured = env["CODEX_BRIDGE_DATA_ROOT"], !configured.isEmpty {
+        return configured
+      }
+      guard let exe = serviceExecutablePath(),
+        let sep = exe.lastIndex(of: "\\")
+      else { return nil }
+      let dir = String(exe[..<sep])
+      let candidate = dir + "\\codex-bridge-data\\service"
+      var isDir: ObjCBool = false
+      if FileManager.default.fileExists(atPath: candidate, isDirectory: &isDir),
+        isDir.boolValue
+      {
+        return candidate
+      }
+      let parent = dir + "\\codex-bridge-data"
+      if FileManager.default.fileExists(atPath: parent, isDirectory: &isDir),
+        isDir.boolValue
+      {
+        return candidate
+      }
+      return nil
+    }
+
+    private static func portableBootstrapLogURL() -> URL? {
+      guard let root = portableDataRoot() else { return nil }
+      return URL(fileURLWithPath: root, isDirectory: true)
         .appending(path: "Logs", directoryHint: .isDirectory)
         .appending(path: "service-bootstrap.log")
     }
@@ -95,7 +129,15 @@
       var startupInfo = STARTUPINFOW()
       startupInfo.cb = DWORD(MemoryLayout<STARTUPINFOW>.size)
       var processInfo = PROCESS_INFORMATION()
-      var commandLine = Array("\"\(executablePath)\"".utf16) + [WCHAR(0)]
+      // Portable fix: relaunch with the same --data-root the shim uses.
+      let dataRoot = portableDataRoot()
+      let commandText: String
+      if let dataRoot {
+        commandText = "\"\(executablePath)\" --data-root \"\(dataRoot)\""
+      } else {
+        commandText = "\"\(executablePath)\""
+      }
+      var commandLine = Array(commandText.utf16) + [WCHAR(0)]
       // The launcher derives the service path from this executable's own
       // directory, so the separator always exists and the child never
       // inherits a stale working directory from the shell.

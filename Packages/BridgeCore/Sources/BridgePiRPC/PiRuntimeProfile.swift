@@ -152,7 +152,8 @@ struct PiRuntimeProfile: Sendable {
     #endif
     let keys = [
       "USER", "LOGNAME", "LANG", "LC_ALL", "SHELL", "TEMP", "TMP", "TMPDIR",
-      "PI_CODING_AGENT_DIR",
+      "PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR",
+      "PI_OFFLINE", "PI_SKIP_VERSION_CHECK", "PI_TELEMETRY", "PI_CACHE_RETENTION",
       "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
       "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
       "OPENROUTER_API_KEY", "GROQ_API_KEY", "XAI_API_KEY", "DEEPSEEK_API_KEY",

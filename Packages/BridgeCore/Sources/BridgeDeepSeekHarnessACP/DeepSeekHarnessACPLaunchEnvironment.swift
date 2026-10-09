@@ -16,7 +16,20 @@ extension DeepSeekHarnessACPLaunchBuilder {
     let xdgData = try DeepSeekHarnessACPPathSupport.append("xdg-data", to: runDirectory)
     let xdgState = try DeepSeekHarnessACPPathSupport.append("xdg-state", to: runDirectory)
     let temporary = try DeepSeekHarnessACPPathSupport.append("tmp", to: runDirectory)
-    let dshHome = try DeepSeekHarnessACPPathSupport.append("dsh-home", to: runDirectory)
+    // Generic data-isolation: when the shim/GUI pins DSH_HOME (any vendor
+    // layout), reuse it so sessions/providers persist in the portable package.
+    // Otherwise keep the isolated per-run dsh-home.
+    let dshHome: String
+    if let override = sourceEnvironment["DSH_HOME"] ?? sourceEnvironment["CODEX_BRIDGE_DSH_HOME"],
+      !override.isEmpty,
+      override.rangeOfCharacter(from: .controlCharacters) == nil,
+      !override.contains("\0")
+    {
+      try DeepSeekHarnessACPPathSupport.createPrivateDirectory(override)
+      dshHome = override
+    } else {
+      dshHome = try DeepSeekHarnessACPPathSupport.append("dsh-home", to: runDirectory)
+    }
     let snapshots: String
     if let persistentStateDirectory {
       snapshots = try DeepSeekHarnessACPPathSupport.preparePrivateDirectory(
