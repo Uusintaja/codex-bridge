@@ -14,8 +14,11 @@
     }
 
     /// Returns false when another copy already owns the session; that copy is restored.
+    /// Portable fix: scope the single-instance mutex to the executable directory
+    /// (same FNV-1a hashing as WindowsPipeIdentity) so two portable copies can
+    /// run side by side without stealing each other's window.
     public static func claimInstanceOrActivateExisting() -> Bool {
-      let mutexName = "Local\\CodexBridge.WindowsApp.SingleInstance"
+      let mutexName = singleInstanceMutexName()
       SetLastError(0)
       let created = mutexName.withCString(encodedAs: UTF16.self) {
         CreateMutexW(nil, true, $0)
@@ -83,8 +86,10 @@
     nonisolated(unsafe) private static var instanceMutex: HANDLE?
 
     private static func activateExistingMainWindow() {
+      // Only activate a window owned by this portable copy.
+      let expected = currentExecutablePath()
       for _ in 0..<30 {
-        if let window = findMainWindow() {
+        if let window = findMainWindow(for: expected) {
           var processID: DWORD = 0
           _ = GetWindowThreadProcessId(window, &processID)
           if processID > 0 {
@@ -102,6 +107,25 @@
       let length = GetModuleFileNameW(nil, &buffer, DWORD(buffer.count))
       guard length > 0, length < DWORD(buffer.count) else { return nil }
       return String(decoding: buffer.prefix(Int(length)), as: UTF16.self)
+    }
+
+    /// Portable-scoped single-instance name (FNV-1a of exe directory).
+    private static func singleInstanceMutexName() -> String {
+      guard let path = currentExecutablePath(),
+        let sep = path.lastIndex(of: "\\")
+      else {
+        return "Local\\CodexBridge.WindowsApp.SingleInstance"
+      }
+      let directory = String(path[..<sep]).lowercased().replacingOccurrences(
+        of: "/", with: "\\")
+      var hash: UInt64 = 14_695_981_039_346_656_037
+      for byte in directory.utf8 {
+        hash ^= UInt64(byte)
+        hash = hash &* 1_099_511_628_211
+      }
+      let suffix = String(hash, radix: 16).lowercased()
+      let padded = String(repeating: "0", count: max(0, 16 - suffix.count)) + suffix
+      return "Local\\CodexBridge.WindowsApp.SingleInstance.\(padded)"
     }
 
     private static func processImagePath(_ process: HANDLE) -> String? {

@@ -25,11 +25,19 @@ enum ServiceAgentAutoDiscovery {
     if let discoveredExecutablePath {
       existingPaths.insert(discoveredExecutablePath, at: 0)
     }
+    // Generic explicit overrides (shim/GUI computed, vendor-agnostic).
+    // Highest priority; isolated mode additionally skips all host search.
+    existingPaths.insert(
+      contentsOf: explicitExecutableCandidates(
+        providerID: providerID, environment: environment),
+      at: 0)
+    let isolated = ToolDiscoveryEnvironment.isIsolated
+    let allowSearch = (!isolated) && (discoveredExecutablePath == nil)
     switch providerID {
     case .qoder:
       return try qoderRequests(
         existingPaths: existingPaths, environment: environment,
-        allowInstallationSearch: discoveredExecutablePath == nil,
+        allowInstallationSearch: allowSearch,
         distribution: qoderDistribution,
         distributionsByExecutablePath: qoderDistributionsByExecutablePath
       )
@@ -42,7 +50,7 @@ enum ServiceAgentAutoDiscovery {
         securityProfileID: AgentProfileID(rawValue: "pi-managed"),
         existingPaths: existingPaths,
         environment: environment,
-        allowInstallationSearch: discoveredExecutablePath == nil
+        allowInstallationSearch: allowSearch
       )
     case .openCode:
       return try commandLineRequests(
@@ -53,7 +61,7 @@ enum ServiceAgentAutoDiscovery {
         securityProfileID: ServiceAgentProviderPolicyRegistry.controlledReadOnlyProfileID,
         existingPaths: existingPaths,
         environment: environment,
-        allowInstallationSearch: discoveredExecutablePath == nil
+        allowInstallationSearch: allowSearch
       )
     case .antigravity:
       return try commandLineRequests(
@@ -64,12 +72,18 @@ enum ServiceAgentAutoDiscovery {
         securityProfileID: AgentProfileID(rawValue: "desktop-shared"),
         existingPaths: existingPaths,
         environment: environment,
-        allowInstallationSearch: discoveredExecutablePath == nil
+        allowInstallationSearch: allowSearch
       )
     case .deepSeekHarness:
       var environment = environment
       if let discoveredExecutablePath {
         environment["CODEX_BRIDGE_DEEPSEEK_HARNESS_EXECUTABLE"] = discoveredExecutablePath
+      } else if environmentValue("CODEX_BRIDGE_DEEPSEEK_HARNESS_EXECUTABLE", environment: environment) == nil,
+        let generic = environmentValue("CODEX_BRIDGE_DSH_EXECUTABLE", environment: environment)
+      {
+        // Generic alias -> legacy DSH key (existing deepSeekExecutableCandidates
+        // already honours the legacy key).
+        environment["CODEX_BRIDGE_DEEPSEEK_HARNESS_EXECUTABLE"] = generic
       }
       return try deepSeekRequests(
         dataPaths: dataPaths,
@@ -307,5 +321,27 @@ enum ServiceAgentAutoDiscovery {
 
   static func pathKey(_ path: String) -> String {
     AgentPathStyle.current == .windows ? path.lowercased() : path
+  }
+
+  /// Generic explicit executable lookup. Shim/GUI sets one absolute path per
+  /// provider (any portable layout); core never inspects installer layouts.
+  static func explicitExecutableCandidates(
+    providerID: AgentProviderID,
+    environment: [String: String]
+  ) -> [String] {
+    let key: String
+    switch providerID {
+    case .openCode: key = "CODEX_BRIDGE_OPENCODE_EXECUTABLE"
+    case .pi: key = "CODEX_BRIDGE_PI_EXECUTABLE"
+    case .qoder: key = "CODEX_BRIDGE_QODER_EXECUTABLE"
+    case .antigravity: key = "CODEX_BRIDGE_AGY_EXECUTABLE"
+    case .deepSeekHarness: key = "CODEX_BRIDGE_DSH_EXECUTABLE"
+    case .codex: key = "CODEX_BRIDGE_CODEX_EXECUTABLE"
+    default: return []
+    }
+    guard let v = environmentValue(key, environment: environment), !v.isEmpty else {
+      return []
+    }
+    return [v]
   }
 }

@@ -9,27 +9,74 @@ import Foundation
 /// A background service keeps the environment captured when it was launched, so
 /// `PATH` and tool roots written by an installation completed afterwards stay
 /// invisible to it; on Windows the registry values are the current ones.
+///
+/// Portable mode (generic, no vendor binding):
+/// when `CODEX_BRIDGE_ISOLATED=1`, host registry PATH merge is skipped and only
+/// explicit `CODEX_BRIDGE_*` overrides plus agent home vars from the process
+/// environment are honoured. The shim/GUI computes absolute paths (any portable
+/// layout) and passes them via these generic variables.
 public enum ToolDiscoveryEnvironment {
+  /// Generic isolation switch, set by any portable shim.
+  public static var isIsolated: Bool {
+    let env = ProcessInfo.processInfo.environment
+    return env.first(where: { $0.key.caseInsensitiveCompare("CODEX_BRIDGE_ISOLATED") == .orderedSame })?.value == "1"
+  }
+
   public static func current() -> [String: String] {
     var environment = ProcessInfo.processInfo.environment
     #if os(Windows)
       let machineKey = #"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"#
-      let path = [
-        registeredValue("Path", root: HKEY_LOCAL_MACHINE, subkey: machineKey),
-        registeredValue("Path", root: HKEY_CURRENT_USER, subkey: "Environment"),
-        environment.first(where: { $0.key.caseInsensitiveCompare("PATH") == .orderedSame })?.value,
-      ].compactMap { $0 }.filter { !$0.isEmpty }
-      environment = environment.filter { $0.key.caseInsensitiveCompare("PATH") != .orderedSame }
-      environment["PATH"] = path.joined(separator: ";")
+      if isIsolated {
+        // Portable fenced mode: keep the shim's PATH as-is so host installs
+        // cannot punch through. Explicit overrides below still apply.
+      } else {
+        let path = [
+          registeredValue("Path", root: HKEY_LOCAL_MACHINE, subkey: machineKey),
+          registeredValue("Path", root: HKEY_CURRENT_USER, subkey: "Environment"),
+          environment.first(where: { $0.key.caseInsensitiveCompare("PATH") == .orderedSame })?.value,
+        ].compactMap { $0 }.filter { !$0.isEmpty }
+        environment = environment.filter { $0.key.caseInsensitiveCompare("PATH") != .orderedSame }
+        environment["PATH"] = path.joined(separator: ";")
+      }
       for name in [
         "PNPM_HOME", "NPM_CONFIG_PREFIX", "YARN_GLOBAL_FOLDER", "BUN_INSTALL", "CARGO_HOME",
         "VOLTA_HOME",
         "NVM_HOME", "NVM_SYMLINK",
+        // Generic explicit executable overrides (highest priority, shim/GUI set).
         "CODEX_BRIDGE_CODEX_EXECUTABLE",
+        "CODEX_BRIDGE_OPENCODE_EXECUTABLE",
+        "CODEX_BRIDGE_PI_EXECUTABLE",
+        "CODEX_BRIDGE_QODER_EXECUTABLE",
+        "CODEX_BRIDGE_AGY_EXECUTABLE",
+        "CODEX_BRIDGE_ANTIGRAVITY_EXECUTABLE",
+        "CODEX_BRIDGE_CLAUDE_EXECUTABLE",
+        "CODEX_BRIDGE_DSH_EXECUTABLE",
+        "CODEX_BRIDGE_DSH_HOME",
+        "CODEX_BRIDGE_DSH_NODE",
+        "CODEX_BRIDGE_DATA_ROOT",
+        "CODEX_BRIDGE_ISOLATED",
+        // Generic agent home overrides (data-isolation friendly, vendor docs).
+        "CODEX_HOME", "CODEX_SQLITE_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR",
+        "OPENCODE_CONFIG_DIR", "OPENCODE_DATA_DIR", "OPENCODE_CACHE_DIR",
+        "OPENCODE_LOG_DIR", "OPENCODE_STATE_DIR", "OPENCODE_APPNAME",
+        "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
+        "DSH_HOME",
         "CODEX_BRIDGE_DEEPSEEK_HARNESS_ROOT", "DEEPSEEK_HARNESS_ROOT",
         "CODEX_BRIDGE_DEEPSEEK_HARNESS_EXECUTABLE", "DEEPSEEK_HARNESS_EXECUTABLE",
         "CODEX_BRIDGE_DEEPSEEK_HARNESS_CONFIGURATION", "DEEPSEEK_HARNESS_CONFIGURATION",
       ] {
+        // Shim/GUI values always win: only fill from registry when the process
+        // environment does not already carry the key.
+        if environment.first(where: { $0.key.caseInsensitiveCompare(name) == .orderedSame }) != nil {
+          continue
+        }
+        // In isolated mode never let host registry reintroduce host paths,
+        // except for explicit bridge overrides.
+        if isIsolated, !name.hasPrefix("CODEX_BRIDGE_"), !name.hasPrefix("DEEPSEEK_HARNESS_") {
+          continue
+        }
         let value =
           registeredValue(name, root: HKEY_CURRENT_USER, subkey: "Environment")
           ?? registeredValue(

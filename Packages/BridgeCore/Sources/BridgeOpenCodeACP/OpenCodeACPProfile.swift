@@ -208,6 +208,19 @@ public struct OpenCodeACPLaunchBuilder: Sendable {
         environment[key] = value
       }
     }
+    // Generic portable overrides (any vendor layout): newer opencode honours
+    // OPENCODE_*_DIR / OPENCODE_APPNAME over XDG. Pass through when pinned.
+    for key in [
+      "OPENCODE_CONFIG_DIR", "OPENCODE_DATA_DIR", "OPENCODE_CACHE_DIR",
+      "OPENCODE_LOG_DIR", "OPENCODE_STATE_DIR", "OPENCODE_APPNAME",
+      "OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT",
+    ] {
+      if let value = source[key], !value.isEmpty, !value.contains("\0"),
+        value.rangeOfCharacter(from: .controlCharacters) == nil
+      {
+        environment[key] = value
+      }
+    }
     return environment
   }
 
