@@ -84,6 +84,15 @@
     }
 
     func userDataFolderPath() -> String? {
+      // Multi-instance rule: prefer the orchestrator-assigned data-root so
+      // each profile (e.g. different ChatGPT logins) gets its own EBWebView
+      // cookies. Falls back to LOCALAPPDATA (legacy single copy).
+      let env = ProcessInfo.processInfo.environment
+      if let root = env["CODEX_BRIDGE_DATA_ROOT"], !root.isEmpty {
+        var base = root.replacingOccurrences(of: "/", with: "\\")
+        while base.count > 3, base.hasSuffix("\\") { base.removeLast() }
+        return base + "\\WebView2\\" + profileName
+      }
       let required = "LOCALAPPDATA".withCString(encodedAs: UTF16.self) {
         GetEnvironmentVariableW($0, nil, 0)
       }

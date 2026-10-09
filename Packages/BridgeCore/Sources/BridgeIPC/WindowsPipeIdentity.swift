@@ -2,11 +2,16 @@
   import Foundation
   import WinSDK
 
-  /// Derives a stable, installation-scoped named-pipe endpoint from the
-  /// executable directory. The service and shell in one directory therefore
-  /// share an endpoint while separate portable copies do not.
+  /// Derives a stable endpoint. Multi-instance rule (generic, no vendor
+  /// binding): when `CODEX_BRIDGE_DATA_ROOT` is set (one per orchestrator
+  /// profile), identity hashes the data-root so a single binary directory can
+  /// host N isolated instances. Otherwise falls back to the executable
+  /// directory (legacy single-copy behaviour, unchanged).
   public enum WindowsPipeIdentity {
     public static func currentPipeName() -> String {
+      if let root = instanceScope() {
+        return pipeName(forScope: root)
+      }
       guard let directory = currentExecutableDirectory() else {
         fatalError("The current Windows executable directory is unavailable.")
       }
@@ -14,6 +19,9 @@
     }
 
     public static func currentMutexName() -> String {
+      if let root = instanceScope() {
+        return mutexName(forScope: root)
+      }
       guard let directory = currentExecutableDirectory() else {
         fatalError("The current Windows executable directory is unavailable.")
       }
@@ -26,6 +34,27 @@
 
     public static func mutexName(forExecutableDirectory directory: String) -> String {
       "Global\\org.codexbridge.service.\(identifier(forExecutableDirectory: directory))"
+    }
+
+    public static func pipeName(forScope scope: String) -> String {
+      "\\\\.\\pipe\\org.codexbridge.service.\(identifier(forScope: scope))"
+    }
+
+    public static func mutexName(forScope scope: String) -> String {
+      "Global\\org.codexbridge.service.\(identifier(forScope: scope))"
+    }
+
+    /// Per-instance scope: explicit data-root wins (shim sets one per
+    /// profile); CODEX_BRIDGE_INSTANCE alone also scopes when set.
+    private static func instanceScope() -> String? {
+      let env = ProcessInfo.processInfo.environment
+      if let root = env["CODEX_BRIDGE_DATA_ROOT"], !root.isEmpty {
+        return "dataroot:" + root
+      }
+      if let inst = env["CODEX_BRIDGE_INSTANCE"], !inst.isEmpty {
+        return "instance:" + inst
+      }
+      return nil
     }
 
     private static func currentExecutableDirectory() -> String? {
@@ -48,7 +77,11 @@
     }
 
     private static func identifier(forExecutableDirectory directory: String) -> String {
-      let normalized = normalize(directory)
+      identifier(forScope: directory)
+    }
+
+    private static func identifier(forScope scope: String) -> String {
+      let normalized = normalize(scope)
       precondition(!normalized.isEmpty)
       let hash = fnv1a64(normalized.utf8)
       let suffix = String(hash, radix: 16).lowercased()
