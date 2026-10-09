@@ -85,7 +85,7 @@
     /// The UI pump in WindowsUIThread.run() never called CoInitializeEx, so the
     /// first SHBrowseForFolder/IFileDialog here would return CO_E_NOTINITIALIZED
     /// or an empty tree. Kept for process lifetime on purpose.
-    private static var comInitialized: Bool = false
+    nonisolated(unsafe) private static var comInitialized: Bool = false
     private static func ensureUIThreadCOM() {
       guard !comInitialized else { return }
       // COINIT_APARTMENTTHREADED = 0x2. S_OK = 0, S_FALSE = 1.
