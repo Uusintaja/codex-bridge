@@ -75,10 +75,22 @@
 
     private static func chooseDirectory() -> String? {
       ensureUIThreadCOM()
-      if let modern = chooseDirectoryModern() {
-        return modern
+      switch chooseDirectoryModern() {
+      case .selected(let path):
+        return path
+      case .cancelled:
+        // User pressed Cancel/Esc: terminal, must NOT fall back to legacy
+        // (legacy would pop a second dialog behind the first).
+        return nil
+      case .failed:
+        return chooseDirectoryLegacy()
       }
-      return chooseDirectoryLegacy()
+    }
+
+    private enum FolderPickerOutcome {
+      case selected(String)
+      case cancelled
+      case failed
     }
 
     /// Ensures the Win32 UI thread is STA-initialized for Shell dialogs.
@@ -100,8 +112,8 @@
 
     /// Modern picker: IFileOpenDialog with FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM.
     /// Supports long paths, search box, breadcrumb, and redirected profiles.
-    /// Returns nil on cancel or failure (falls back to legacy).
-    private static func chooseDirectoryModern() -> String? {
+    /// Cancel (HRESULT_CANCELLED) is terminal; only genuine failures fall back.
+    private static func chooseDirectoryModern() -> FolderPickerOutcome {
       let title = "选择要注册到 Codex Bridge 的项目目录"
       var dialog: UnsafeMutableRawPointer?
       var clsid = makeFolderPickerGUID(
@@ -114,7 +126,7 @@
       )
       // CLSCTX_INPROC_SERVER = 1
       let hrCreate = CoCreateInstance(&clsid, nil, DWORD(1), &iid, &dialog)
-      guard hrCreate == 0, let dialog else { return nil }
+      guard hrCreate == 0, let dialog else { return .failed }
       defer { folderPickerRelease(dialog) }
 
       // FOS_PICKFOLDERS(0x20) | FOS_FORCEFILESYSTEM(0x40) | FOS_NOCHANGEDIR(0x08)
@@ -133,11 +145,14 @@
 
       let owner = WindowsMainWindow.currentWindow()
       let hrShow = folderPickerShow(dialog, owner)
-      guard hrShow == 0 else { return nil }
+      // HRESULT_FROM_WIN32(ERROR_CANCELLED=1223) = 0x800704C7: user cancelled.
+      if hrShow == HRESULT(bitPattern: 0x8007_04C7) { return .cancelled }
+      guard hrShow == 0 else { return .failed }
       var result: UnsafeMutableRawPointer?
-      guard folderPickerGetResult(dialog, &result) == 0, let result else { return nil }
+      guard folderPickerGetResult(dialog, &result) == 0, let result else { return .failed }
       defer { folderPickerRelease(result) }
-      return shellItemFilePath(result)
+      guard let path = shellItemFilePath(result) else { return .failed }
+      return .selected(path)
     }
 
     /// Legacy fallback: SHBrowseForFolderW with 32k buffer.
