@@ -221,6 +221,21 @@ public struct OpenCodeACPLaunchBuilder: Sendable {
         environment[key] = value
       }
     }
+    // Provider credentials: the ACP child must see the same keys the user
+    // configured (e.g. OPENCODE_API_KEY for OpenCode Zen). Without this the
+    // isolated child has no auth and every model reports unavailable.
+    for key in [
+      "OPENCODE_API_KEY",
+      "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN",
+      "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+      "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "OPENAI_COMPATIBLE_API_KEY",
+    ] {
+      if let value = source[key], !value.isEmpty, !value.contains("\0"),
+        value.rangeOfCharacter(from: .controlCharacters) == nil
+      {
+        environment[key] = value
+      }
+    }
     return environment
   }
 
