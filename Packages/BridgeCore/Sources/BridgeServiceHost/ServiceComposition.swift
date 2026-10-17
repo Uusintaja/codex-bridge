@@ -6,6 +6,7 @@ import BridgeDeepSeekHarnessACP
 import BridgeDeepSeekHarnessDesktop
 import BridgeDirectCommand
 import BridgeDomain
+import BridgeIPC
 import BridgeLegacyImport
 import BridgeMCP
 import BridgeOpenCodeACP
@@ -301,6 +302,7 @@ public actor ServiceComposition {
       settings: settings,
       runtimeStatus: runtimeStatus,
       secretStore: secretStore,
+      runtimeKeyReference: ServiceTunnelController.runtimeKeyReference(forDataRoot: paths.rootURL),
       factory: resolvedTunnelFactory
     )
     let secretProvider = ServiceMCPSecretProvider(

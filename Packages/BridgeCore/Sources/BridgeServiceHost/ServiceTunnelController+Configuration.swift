@@ -12,7 +12,8 @@ extension ServiceTunnelController {
     guard !isShutdown else { throw ServiceTunnelError.serviceStopped }
     let tunnelID = try TunnelID(validating: rawTunnelID)
     let runtimeKey = try Self.validatedRuntimeKey(rawRuntimeKey)
-    try await persist(tunnelID: tunnelID, runtimeKey: runtimeKey, enabled: true)
+    let configurationChanged = try await persist(
+      tunnelID: tunnelID, runtimeKey: runtimeKey, enabled: true)
     self.tunnelID = tunnelID
     self.enabled = true
     snapshot = ServiceTunnelSnapshot(
@@ -25,6 +26,11 @@ extension ServiceTunnelController {
       actionRequired: false,
       httpProxy: httpProxy?.url.absoluteString
     )
+    if configurationChanged, try await currentManagerIsUsable() {
+      // A live helper still holds the previously persisted credentials; restart
+      // it so a changed tunnel ID or runtime key takes effect immediately.
+      await stopCurrent(publishStopped: false)
+    }
     try await startConfigured()
     return snapshot
   }
@@ -57,7 +63,7 @@ extension ServiceTunnelController {
     try await settings.set(nil, for: .tunnelHTTPProxy)
     httpProxy = nil
     do {
-      try secretStore.remove(Self.runtimeKeyReference)
+      try secretStore.remove(runtimeKeyReference)
     } catch SecretStoreError.notFound {
     } catch {
       throw ServiceTunnelError.secretStoreUnavailable
@@ -155,32 +161,36 @@ extension ServiceTunnelController {
     }
   }
 
+  /// Persists the configuration; returns true when the stored tunnel ID or
+  /// runtime key actually changed (callers restart a live helper then).
+  @discardableResult
   private func persist(
     tunnelID: TunnelID,
     runtimeKey: Data,
     enabled: Bool
-  ) async throws {
-    let previousKey = try? secretStore.load(Self.runtimeKeyReference)
+  ) async throws -> Bool {
+    let previousKey = try? secretStore.load(runtimeKeyReference)
     let previousID = try? await settings.string(for: .tunnelID)
     let previousEnabled = try? await settings.string(for: .tunnelEnabled)
     do {
-      try secretStore.store(runtimeKey, for: Self.runtimeKeyReference)
+      try secretStore.store(runtimeKey, for: runtimeKeyReference)
       try await settings.set(tunnelID.rawValue, for: .tunnelID)
       try await settings.set(enabled ? "1" : "0", for: .tunnelEnabled)
     } catch {
       if let previousKey {
-        try? secretStore.store(previousKey, for: Self.runtimeKeyReference)
+        try? secretStore.store(previousKey, for: runtimeKeyReference)
       } else {
-        try? secretStore.remove(Self.runtimeKeyReference)
+        try? secretStore.remove(runtimeKeyReference)
       }
       try? await settings.set(previousID ?? nil, for: .tunnelID)
       try? await settings.set(previousEnabled ?? nil, for: .tunnelEnabled)
       throw ServiceTunnelError.secretStoreUnavailable
     }
+    return previousKey != runtimeKey || previousID != tunnelID.rawValue
   }
 
   func hasRuntimeKey() -> Bool {
-    guard let data = try? secretStore.load(Self.runtimeKeyReference),
+    guard let data = try? secretStore.load(runtimeKeyReference),
       let value = String(data: data, encoding: .utf8)
     else {
       return false

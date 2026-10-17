@@ -1,3 +1,4 @@
+import BridgeIPC
 import BridgeSecurity
 import BridgeServiceApplication
 import BridgeServiceCore
@@ -5,13 +6,21 @@ import BridgeTunnel
 import Foundation
 
 public actor ServiceTunnelController {
-  public static let runtimeKeyReference = SecretReference(
-    rawValue: "service.tunnel-runtime-key"
-  )
+  /// Per-instance runtime key slot: the reference embeds the FNV-1a identity
+  /// of the instance data root, so N instances (one per orchestrator profile,
+  /// each with its own ChatGPT account) never overwrite each other's key.
+  public static func runtimeKeyReference(forDataRoot dataRoot: URL) -> SecretReference {
+    let scope = "dataroot:" + dataRoot.standardizedFileURL.path
+    return SecretReference(
+      rawValue: "service.tunnel-runtime-key."
+        + BridgeInstanceIdentifier.identifier(forScope: scope)
+    )
+  }
 
   let settings: ServiceSettings
   let runtimeStatus: ServiceRuntimeStatus
   let secretStore: any SecretStore
+  let runtimeKeyReference: SecretReference
   let factory: any ServiceTunnelManagerBuilding
   private let monitorInterval: Duration
   private let restartDelays: [Duration]
@@ -32,6 +41,7 @@ public actor ServiceTunnelController {
     settings: ServiceSettings,
     runtimeStatus: ServiceRuntimeStatus,
     secretStore: any SecretStore,
+    runtimeKeyReference: SecretReference,
     factory: any ServiceTunnelManagerBuilding,
     monitorInterval: Duration = .seconds(2),
     restartDelays: [Duration] = [.seconds(1), .seconds(2), .seconds(4)]
@@ -40,6 +50,7 @@ public actor ServiceTunnelController {
     self.settings = settings
     self.runtimeStatus = runtimeStatus
     self.secretStore = secretStore
+    self.runtimeKeyReference = runtimeKeyReference
     self.factory = factory
     self.monitorInterval = monitorInterval
     self.restartDelays = Array(restartDelays.prefix(5))
@@ -148,7 +159,7 @@ public actor ServiceTunnelController {
     return (tunnelID, localMCPURL, localMCPHeaderSecret, httpProxy)
   }
 
-  private func currentManagerIsUsable() async throws -> Bool {
+  func currentManagerIsUsable() async throws -> Bool {
     guard let current = manager else { return false }
     switch await current.state() {
     case .ready:
@@ -230,7 +241,7 @@ public actor ServiceTunnelController {
     }
     let candidate = try await factory.make(
       tunnelID: context.tunnelID,
-      runtimeKeyReference: Self.runtimeKeyReference,
+      runtimeKeyReference: runtimeKeyReference,
       localMCPURL: context.localMCPURL,
       localMCPHeaderSecret: context.localMCPHeaderSecret,
       httpProxy: context.httpProxy
@@ -373,7 +384,7 @@ public actor ServiceTunnelController {
       do {
         let candidate = try await factory.make(
           tunnelID: tunnelID,
-          runtimeKeyReference: Self.runtimeKeyReference,
+          runtimeKeyReference: runtimeKeyReference,
           localMCPURL: localMCPURL,
           localMCPHeaderSecret: localMCPHeaderSecret,
           httpProxy: httpProxy

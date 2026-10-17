@@ -44,6 +44,19 @@
       "Global\\org.codexbridge.service.\(identifier(forScope: scope))"
     }
 
+    /// Per-instance identifier (16 lowercase hex digits) for the current
+    /// process scope: explicit env scope when set, executable directory
+    /// otherwise. Same derivation as the pipe and mutex names.
+    public static func currentInstanceIdentifier() -> String {
+      if let root = instanceScope() {
+        return identifier(forScope: root)
+      }
+      guard let directory = currentExecutableDirectory() else {
+        fatalError("The current Windows executable directory is unavailable.")
+      }
+      return identifier(forExecutableDirectory: directory)
+    }
+
     /// Per-instance scope: explicit data-root wins (shim sets one per
     /// profile); CODEX_BRIDGE_INSTANCE alone also scopes when set.
     private static func instanceScope() -> String? {
@@ -68,33 +81,12 @@
       return String(executable[..<separator])
     }
 
-    private static func normalize(_ directory: String) -> String {
-      var value = directory.replacingOccurrences(of: "/", with: "\\").lowercased()
-      while value.count > 3, value.hasSuffix("\\") {
-        value.removeLast()
-      }
-      return value
-    }
-
     private static func identifier(forExecutableDirectory directory: String) -> String {
       identifier(forScope: directory)
     }
 
     private static func identifier(forScope scope: String) -> String {
-      let normalized = normalize(scope)
-      precondition(!normalized.isEmpty)
-      let hash = fnv1a64(normalized.utf8)
-      let suffix = String(hash, radix: 16).lowercased()
-      return String(repeating: "0", count: max(0, 16 - suffix.count)) + suffix
-    }
-
-    private static func fnv1a64<S: Sequence>(_ bytes: S) -> UInt64 where S.Element == UInt8 {
-      var hash: UInt64 = 14_695_981_039_346_656_037
-      for byte in bytes {
-        hash ^= UInt64(byte)
-        hash = hash &* 1_099_511_628_211
-      }
-      return hash
+      BridgeInstanceIdentifier.identifier(forScope: scope)
     }
   }
 
