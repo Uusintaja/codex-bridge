@@ -41,6 +41,7 @@
         return nil
       }
       self.window = window
+      WindowsApplicationIdentity.attachInstanceScope(to: window)
       applyDwmAttributes(to: window)
       setWindowIcons(window)
       WindowsMainWindowChrome.install(on: window)
